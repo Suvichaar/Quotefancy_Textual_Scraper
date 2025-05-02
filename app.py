@@ -19,76 +19,117 @@ st.set_page_config(page_title="Quote Utility Toolkit", layout="wide")
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🕸️ Scrape Quotes from QuoteFancy",
     "📊 Structure Quotes by Author",
+    "🧠 CSV Cleaner + Azure Batch JSONL Generator",
     "👤 Distinct Author Extractor",
     "🖼️ Bulk Image Downloader + S3 CDN Uploader",
-    "🧠 CSV Cleaner + Azure Batch JSONL Generator",
+    "🧠 CSV Cleaner + Azure Batch JSONL Generator",//
     "📅 Merge Metadata into Structured CSV"
 ])
 
 # ------------------- TAB 1 -------------------
 with tab1:
-    st.header("🕸️ Scrape Quotes from QuoteFancy")
-    
-    USER_AGENT = "Mozilla/5.0 ... Safari/537.36"
+    st.title("📝 QuoteFancy Scraper")
+    USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/90.0.4430.93 Safari/537.36"
+    )
     REQUEST_TIMEOUT = 10
     DELAY_BETWEEN_PAGES = 1
-
-    def create_session():
+    MAX_PAGES = 10
+    
+    def create_session_with_retries():
         session = requests.Session()
-        session.headers.update({'User-Agent': USER_AGENT})
-        retries = Retry(total=3, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504])
-        session.mount("http://", HTTPAdapter(max_retries=retries))
-        session.mount("https://", HTTPAdapter(max_retries=retries))
+        session.headers.update({
+            'User-Agent': USER_AGENT,
+            'Accept-Language': 'en-US,en;q=0.9'
+        })
+        retries = Retry(
+            total=3,
+            backoff_factor=0.3,
+            status_forcelist=[500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "OPTIONS"]
+        )
+        adapter = HTTPAdapter(max_retries=retries)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
         return session
-
-    def extract_slug(url):
-        return urlparse(url).path.strip("/").split("/")[0]
-
-    def scrape(slug, max_pages):
-        session = create_session()
-        rows, sn = [], 1
-        for page in range(1, max_pages + 1):
-            url = f"https://quotefancy.com/{slug}/page/{page}"
+    
+    def extract_slug_from_url(url):
+        parsed = urlparse(url)
+        path = parsed.path.strip("/")
+        return path.split("/")[0] if path else ""
+    
+    def scrape_quotes_for_slug(slug, max_pages=MAX_PAGES):
+        session = create_session_with_retries()
+        rows, serial_number = [], 1
+    
+        for page_number in range(1, max_pages + 1):
+            page_url = f"https://quotefancy.com/{slug}/page/{page_number}"
             try:
-                res = session.get(url, timeout=REQUEST_TIMEOUT)
-                res.raise_for_status()
-            except:
+                response = session.get(page_url, timeout=REQUEST_TIMEOUT)
+                response.raise_for_status()
+            except requests.RequestException:
                 break
-            soup = BeautifulSoup(res.content, "html.parser")
-            items = soup.find_all("div", class_="q-wrapper")
-            if not items: break
-            for item in items:
-                qt = item.find("div", class_="quote-a") or item.find("a", class_="quote-a")
-                txt = qt.get_text(strip=True) if qt else ""
-                href = qt.find("a").get("href", "") if qt and qt.find("a") else ""
-                auth = item.find("div", class_="author-p bylines")
-                auth = auth.get_text(strip=True).replace("by ", "") if auth else "Anonymous"
-                rows.append([sn, txt, href, auth])
-                sn += 1
+    
+            soup = BeautifulSoup(response.content, "html.parser")
+            containers = soup.find_all("div", class_="q-wrapper")
+            if not containers:
+                break
+    
+            for container in containers:
+                quote_div = container.find("div", class_="quote-a")
+                quote_text = quote_div.get_text(strip=True) if quote_div else container.find("a", class_="quote-a").get_text(strip=True)
+    
+                quote_link = ""
+                if quote_div and quote_div.find("a"):
+                    quote_link = quote_div.find("a").get("href", "")
+                elif container.find("a", class_="quote-a"):
+                    quote_link = container.find("a", class_="quote-a").get("href", "")
+    
+                author_div = container.find("div", class_="author-p bylines")
+                if author_div:
+                    author_text = author_div.get_text(strip=True).replace("by ", "").strip()
+                else:
+                    author_p = container.find("p", class_="author-p")
+                    author_text = author_p.find("a").get_text(strip=True) if author_p and author_p.find("a") else "Anonymous"
+    
+                rows.append([serial_number, quote_text, quote_link, author_text])
+                serial_number += 1
+    
             time.sleep(DELAY_BETWEEN_PAGES)
+    
         return rows
-
-    urls = st.text_area("Enter QuoteFancy URLs (comma separated)")
-    max_pages = st.slider("Max Pages per Slug", 1, 20, 10)
-
-    if st.button("Scrape Quotes"):
-        if not urls.strip():
-            st.error("Enter at least one URL")
+    
+    def convert_to_csv_buffer(rows):
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Serial No", "Quote", "Link", "Author"])
+        writer.writerows(rows)
+        return output.getvalue()
+    
+    input_urls = st.text_area("Enter QuoteFancy URLs (comma separated):")
+    filename_prefix = st.text_input("Filename prefix (without extension)", "quotes")
+    
+    if st.button("Start Scraping", key="scrape_button"):
+        if not input_urls or not filename_prefix:
+            st.error("Please provide both URLs and filename prefix.")
         else:
-            all_rows = []
-            for u in urls.split(','):
-                slug = extract_slug(u.strip())
-                st.info(f"Scraping {slug}")
-                all_rows.extend(scrape(slug, max_pages))
-            if all_rows:
-                out = io.StringIO()
-                writer = csv.writer(out)
-                writer.writerow(["Serial No", "Quote", "Link", "Author"])
-                writer.writerows(all_rows)
-                ts = int(time.time())
-                st.download_button("Download CSV", out.getvalue(), file_name=f"quotes_{ts}.csv", mime="text/csv")
+            url_list = [url.strip() for url in input_urls.split(",") if url.strip()]
+            all_quotes = []
+            for url in url_list:
+                slug = extract_slug_from_url(url)
+                st.write(f"🔍 Scraping: `{slug}`")
+                all_quotes.extend(scrape_quotes_for_slug(slug))
+    
+            if all_quotes:
+                csv_data = convert_to_csv_buffer(all_quotes)
+                timestamp = int(time.time())
+                full_filename = f"{filename_prefix}_{timestamp}.csv"
+                st.success(f"✅ Scraped {len(all_quotes)} quotes.")
+                st.download_button("📥 Download CSV", data=csv_data, file_name=full_filename, mime='text/csv')
             else:
-                st.warning("No quotes found")
+                st.warning("⚠️ No quotes scraped.")
 
 # ------------------- TAB 2 -------------------
 with tab2:
@@ -112,56 +153,6 @@ with tab2:
 
 # ------------------- TAB 3 -------------------
 with tab3:
-    st.header("👤 Distinct Author Extractor")
-    file = st.file_uploader("Upload CSV with 'Author' column", type="csv", key="auth_csv")
-    if file:
-        df = pd.read_csv(file)
-        if 'Author' not in df.columns:
-            st.error("Missing 'Author' column")
-        else:
-            authors = ', '.join(sorted(df['Author'].dropna().unique()))
-            st.text_area("Distinct Authors", authors, height=200)
-
-# ------------------- TAB 4 -------------------
-with tab4:
-    st.header("🖼️ Bulk Image Downloader + S3 CDN Uploader")
-    aws_access_key = st.secrets["aws_access_key"]
-    aws_secret_key = st.secrets["aws_secret_key"]
-    region_name = "ap-south-1"
-    bucket_name = "suvichaarapp"
-    s3_prefix = "media/"
-    cdn_base_url = "https://media.suvichaar.org/"
-
-    s3 = boto3.client("s3", aws_access_key_id=aws_access_key, aws_secret_access_key=aws_secret_key, region_name=region_name)
-
-    keywords_input = st.text_input("Enter keywords", "cat,dog,car")
-    count = st.number_input("Images per keyword", 1, 20, 5)
-    filename_input = st.text_input("Output CSV filename", "image_links")
-
-    if st.button("Download & Upload Images"):
-        if os.path.exists("simple_images"): shutil.rmtree("simple_images")
-        for keyword in [k.strip() for k in keywords_input.split(",") if k.strip()]:
-            st.write(f"Downloading {count} images for {keyword}")
-            simp.simple_image_download().download(keyword, count)
-
-        results = []
-        for folder, _, files_ in os.walk("simple_images"):
-            for f in files_:
-                path = os.path.join(folder, f)
-                kf = os.path.basename(folder).replace(" ", "-")
-                fname = f.replace(" ", "-")
-                key = f"{s3_prefix}{kf}/{fname}"
-                try:
-                    s3.upload_file(path, bucket_name, key)
-                    results.append([kf, fname, f"{cdn_base_url}{key}"])
-                except Exception as e:
-                    st.error(f"Failed for {fname}: {e}")
-        out = io.StringIO()
-        csv.writer(out).writerows([["Keyword", "Filename", "CDN_URL"]] + results)
-        st.download_button("Download CDN CSV", out.getvalue(), file_name=f"{filename_input}.csv")
-
-# ------------------- TAB 5 -------------------
-with tab5:
     st.header("🧠 CSV Cleaner + Azure Batch JSONL Generator")
     upload = st.file_uploader("Upload CSV with Author + s2paragraph1 to s9paragraph1", type="csv", key="csv5")
     if upload:
@@ -203,6 +194,56 @@ with tab5:
 
         jsonl_str = "\n".join(json.dumps(p) for p in payloads)
         st.download_button("Download JSONL Batch", data=jsonl_str, file_name=f"quotefancy_azure_batch_{ts}.jsonl")
+        
+# ------------------- TAB 4 -------------------
+with tab4:
+    st.header("👤 Distinct Author Extractor")
+    file = st.file_uploader("Upload CSV with 'Author' column", type="csv", key="auth_csv")
+    if file:
+        df = pd.read_csv(file)
+        if 'Author' not in df.columns:
+            st.error("Missing 'Author' column")
+        else:
+            authors = ', '.join(sorted(df['Author'].dropna().unique()))
+            st.text_area("Distinct Authors", authors, height=200)
+
+# ------------------- TAB 5 -------------------
+with tab5:
+    st.header("🖼️ Bulk Image Downloader + S3 CDN Uploader")
+    aws_access_key = st.secrets["aws_access_key"]
+    aws_secret_key = st.secrets["aws_secret_key"]
+    region_name = "ap-south-1"
+    bucket_name = "suvichaarapp"
+    s3_prefix = "media/"
+    cdn_base_url = "https://media.suvichaar.org/"
+
+    s3 = boto3.client("s3", aws_access_key_id=aws_access_key, aws_secret_access_key=aws_secret_key, region_name=region_name)
+
+    keywords_input = st.text_input("Enter keywords", "cat,dog,car")
+    count = st.number_input("Images per keyword", 1, 20, 5)
+    filename_input = st.text_input("Output CSV filename", "image_links")
+
+    if st.button("Download & Upload Images"):
+        if os.path.exists("simple_images"): shutil.rmtree("simple_images")
+        for keyword in [k.strip() for k in keywords_input.split(",") if k.strip()]:
+            st.write(f"Downloading {count} images for {keyword}")
+            simp.simple_image_download().download(keyword, count)
+
+        results = []
+        for folder, _, files_ in os.walk("simple_images"):
+            for f in files_:
+                path = os.path.join(folder, f)
+                kf = os.path.basename(folder).replace(" ", "-")
+                fname = f.replace(" ", "-")
+                key = f"{s3_prefix}{kf}/{fname}"
+                try:
+                    s3.upload_file(path, bucket_name, key)
+                    results.append([kf, fname, f"{cdn_base_url}{key}"])
+                except Exception as e:
+                    st.error(f"Failed for {fname}: {e}")
+        out = io.StringIO()
+        csv.writer(out).writerows([["Keyword", "Filename", "CDN_URL"]] + results)
+        st.download_button("Download CDN CSV", out.getvalue(), file_name=f"{filename_input}.csv")
 
 # ------------------- TAB 6 -------------------
 with tab6:
