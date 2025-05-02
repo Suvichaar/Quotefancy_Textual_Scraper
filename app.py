@@ -22,7 +22,6 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🧠 CSV Cleaner + Azure Batch JSONL Generator",
     "👤 Distinct Author Extractor",
     "🖼️ Bulk Image Downloader + S3 CDN Uploader",
-    "🧠 CSV Cleaner + Azure Batch JSONL Generator",//
     "📅 Merge Metadata into Structured CSV"
 ])
 
