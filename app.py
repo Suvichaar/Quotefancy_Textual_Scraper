@@ -214,7 +214,7 @@ with tab5:
     region_name = "ap-south-1"
     bucket_name = "suvichaarapp"
     s3_prefix = "media/"
-    cdn_base_url = "https://media.suvichaar.org/"
+    cdn_base_url = "https://cdn.suvichaar.org/"
 
     s3 = boto3.client("s3", aws_access_key_id=aws_access_key, aws_secret_access_key=aws_secret_key, region_name=region_name)
 
