@@ -219,7 +219,7 @@ with tab5:
     s3 = boto3.client("s3", aws_access_key_id=aws_access_key, aws_secret_access_key=aws_secret_key, region_name=region_name)
 
     keywords_input = st.text_input("Enter keywords", "cat,dog,car")
-    count = st.number_input("Images per keyword", 1, 20, 5)
+    count = st.number_input("Images per keyword", 1, 50, 5)
     filename_input = st.text_input("Output CSV filename", "image_links")
 
     if st.button("Download & Upload Images"):
