@@ -4,3 +4,4 @@ requests
 beautifulsoup4
 simple_image_download
 boto3
+openai
