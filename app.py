@@ -274,75 +274,76 @@ with tab3:
 
 # ------------------- TAB 4 -------------------
 # ============================ 🔐 Azure Credentials ============================
-AZURE_OPENAI_API_KEY = st.secrets["azure_openai_api_key"]
-AZURE_STORAGE_CONNECTION_STRING = st.secrets["azure_blob_connection_string"]
-AZURE_STORAGE_CONTAINER = "suvichaarbatch1"
-AZURE_BLOB_ACCOUNT_NAME = "suvichaarblob"
-AZURE_BLOB_ACCOUNT_KEY = st.secrets["azure_blob_account_key"]
-
-client = AzureOpenAI(
-    api_key=AZURE_OPENAI_API_KEY,
-    api_version="2025-03-01-preview",
-    azure_endpoint="https://suvichaarai008818057333687.cognitiveservices.azure.com"
-)
-
-# ============================ 🎯 UI ============================
-st.title("📦 Azure Batch Result Fetcher & Blob Uploader")
-uploaded_file = st.file_uploader("📤 Upload your `azure_batch_tracking_*.json` file", type=["json"])
-
-if uploaded_file:
-    tracking_info = json.load(uploaded_file)
-    batch_id = tracking_info.get("batch_id")
-    ts = tracking_info.get("ts")
-    output_filename = f"batch_results_{ts}.jsonl"
-
-    st.info(f"🔍 Checking status for Batch ID: `{batch_id}`...")
-    batch_job = client.batches.retrieve(batch_id)
-    status = batch_job.status
-    st.write(f"📊 Batch Status: **{status}**")
-
-    if status != "completed":
-        st.warning("⚠️ Batch not ready yet. Please try again later.")
-    else:
-        output_file_id = batch_job.output_file_id or batch_job.error_file_id
-        if not output_file_id:
-            st.error("❌ No output or error file found in batch job.")
+with tab4:
+    AZURE_OPENAI_API_KEY = st.secrets["azure_openai_api_key"]
+    AZURE_STORAGE_CONNECTION_STRING = st.secrets["azure_blob_connection_string"]
+    AZURE_STORAGE_CONTAINER = "suvichaarbatch1"
+    AZURE_BLOB_ACCOUNT_NAME = "suvichaarblob"
+    AZURE_BLOB_ACCOUNT_KEY = st.secrets["azure_blob_account_key"]
+    
+    client = AzureOpenAI(
+        api_key=AZURE_OPENAI_API_KEY,
+        api_version="2025-03-01-preview",
+        azure_endpoint="https://suvichaarai008818057333687.cognitiveservices.azure.com"
+    )
+    
+    # ============================ 🎯 UI ============================
+    st.title("📦 Azure Batch Result Fetcher & Blob Uploader")
+    uploaded_file = st.file_uploader("📤 Upload your `azure_batch_tracking_*.json` file", type=["json"])
+    
+    if uploaded_file:
+        tracking_info = json.load(uploaded_file)
+        batch_id = tracking_info.get("batch_id")
+        ts = tracking_info.get("ts")
+        output_filename = f"batch_results_{ts}.jsonl"
+    
+        st.info(f"🔍 Checking status for Batch ID: `{batch_id}`...")
+        batch_job = client.batches.retrieve(batch_id)
+        status = batch_job.status
+        st.write(f"📊 Batch Status: **{status}**")
+    
+        if status != "completed":
+            st.warning("⚠️ Batch not ready yet. Please try again later.")
         else:
-            # ============================ 📥 Download Batch Output ============================
-            file_response = client.files.content(output_file_id)
-            raw_lines = file_response.text.strip().split('\n')
-            with open(output_filename, "w") as f:
-                for line in raw_lines:
-                    f.write(line + "\n")
-
-            with open(output_filename, "rb") as f:
-                st.download_button("📥 Download Results JSONL", data=f, file_name=output_filename, mime="application/jsonl")
-
-            # ============================ ☁️ Upload to Azure Blob ============================
-            blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
-            container_client = blob_service_client.get_container_client(AZURE_STORAGE_CONTAINER)
-
-            with open(output_filename, "rb") as data:
-                container_client.upload_blob(
-                    name=output_filename,
-                    data=data,
-                    overwrite=True,
-                    content_settings=ContentSettings(content_type="application/json")
+            output_file_id = batch_job.output_file_id or batch_job.error_file_id
+            if not output_file_id:
+                st.error("❌ No output or error file found in batch job.")
+            else:
+                # ============================ 📥 Download Batch Output ============================
+                file_response = client.files.content(output_file_id)
+                raw_lines = file_response.text.strip().split('\n')
+                with open(output_filename, "w") as f:
+                    for line in raw_lines:
+                        f.write(line + "\n")
+    
+                with open(output_filename, "rb") as f:
+                    st.download_button("📥 Download Results JSONL", data=f, file_name=output_filename, mime="application/jsonl")
+    
+                # ============================ ☁️ Upload to Azure Blob ============================
+                blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
+                container_client = blob_service_client.get_container_client(AZURE_STORAGE_CONTAINER)
+    
+                with open(output_filename, "rb") as data:
+                    container_client.upload_blob(
+                        name=output_filename,
+                        data=data,
+                        overwrite=True,
+                        content_settings=ContentSettings(content_type="application/json")
+                    )
+    
+                # ============================ 🔗 Generate SAS URL ============================
+                sas_token = generate_blob_sas(
+                    account_name=AZURE_BLOB_ACCOUNT_NAME,
+                    container_name=AZURE_STORAGE_CONTAINER,
+                    blob_name=output_filename,
+                    account_key=AZURE_BLOB_ACCOUNT_KEY,
+                    permission=BlobSasPermissions(read=True),
+                    expiry=datetime.datetime.utcnow() + datetime.timedelta(days=1)
                 )
-
-            # ============================ 🔗 Generate SAS URL ============================
-            sas_token = generate_blob_sas(
-                account_name=AZURE_BLOB_ACCOUNT_NAME,
-                container_name=AZURE_STORAGE_CONTAINER,
-                blob_name=output_filename,
-                account_key=AZURE_BLOB_ACCOUNT_KEY,
-                permission=BlobSasPermissions(read=True),
-                expiry=datetime.datetime.utcnow() + datetime.timedelta(days=1)
-            )
-
-            blob_url = f"https://{AZURE_BLOB_ACCOUNT_NAME}.blob.core.windows.net/{AZURE_STORAGE_CONTAINER}/{output_filename}?{sas_token}"
-            st.success("✅ File uploaded to Azure Blob Storage.")
-            st.markdown(f"📎 [Click here to download from Azure Blob]({blob_url})", unsafe_allow_html=True)
+    
+                blob_url = f"https://{AZURE_BLOB_ACCOUNT_NAME}.blob.core.windows.net/{AZURE_STORAGE_CONTAINER}/{output_filename}?{sas_token}"
+                st.success("✅ File uploaded to Azure Blob Storage.")
+                st.markdown(f"📎 [Click here to download from Azure Blob]({blob_url})", unsafe_allow_html=True)
 
 # ------------------- TAB 5 -------------------
 with tab5:
