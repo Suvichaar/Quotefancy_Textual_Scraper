@@ -17,7 +17,8 @@ A simple yet powerful Streamlit web app to scrape quotes from [QuoteFancy.com](h
 
 ## 📷 Interface Overview
 
-![QuoteFancy Scraper Screenshot](https://user-images.githubusercontent.com/placeholder/quotefancy-scraper-ui.png) <!-- Replace with your own if hosted -->
+![QuoteFancy Scraper Screenshot]<img width="2240" alt="Screenshot 2025-05-06 at 9 32 55 PM" src="https://github.com/user-attachments/assets/67dce0f1-0a23-49fa-b8c9-f06ae7e9365c" />
+ <!-- Replace with your own if hosted -->
 
 - **Enter QuoteFancy URLs**: Paste multiple URLs separated by commas
 - **Filename Prefix**: Choose your output file’s base name (e.g., `quotes.csv`)
