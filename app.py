@@ -20,7 +20,7 @@ st.set_page_config(page_title="Quote Utility Toolkit", layout="wide")
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🕸️ Scrape Quotes from QuoteFancy",
     "📊 Structure Quotes by Author",
-    "🧠 CSV Cleaner + Azure Batch JSONL Generator",
+    "🧠 Quote Metadata Generator & Azure OpenAI JSONL Creator ",
     "👤 Distinct Author Extractor",
     "🖼️ Bulk Image Downloader + S3 CDN Uploader",
     "📅 Merge Metadata into Structured CSV"
