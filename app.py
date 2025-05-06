@@ -13,6 +13,7 @@ import requests
 from requests.adapters import HTTPAdapter, Retry
 import boto3
 from simple_image_download import simple_image_download as simp
+from openai import AzureOpenAI
 
 st.set_page_config(page_title="Quote Utility Toolkit", layout="wide")
 
@@ -152,18 +153,40 @@ with tab2:
 
 # ------------------- TAB 3 -------------------
 with tab3:
-    st.header("🧠 CSV Cleaner + Azure Batch JSONL Generator")
-    upload = st.file_uploader("Upload CSV with Author + s2paragraph1 to s9paragraph1", type="csv", key="csv5")
-    if upload:
-        df = pd.read_csv(upload)
+    
+    client = AzureOpenAI(
+        api_key=st.secrets["azure_openai_api_key"],
+        api_version="2025-03-01-preview",
+        azure_endpoint="https://suvichaarai008818057333687.cognitiveservices.azure.com"
+        )
+    deployment_model = "gpt-4o-global-batch"
+    
+    # ============================ 🎯 Title ============================
+    st.title("🧠 Quote Metadata Generator & Azure OpenAI JSONL Creator")
+    
+    # ============================ 📤 File Upload ============================
+    uploaded_file = st.file_uploader("Upload your CSV with Author + s2paragraph1 to s9paragraph1", type=["csv"])
+    
+    if uploaded_file:
+        ts = str(int(time.time()))
+        df = pd.read_csv(uploaded_file)
         df.replace(r'^\s*$', pd.NA, regex=True, inplace=True)
         df.replace("NA", pd.NA, inplace=True)
+    
+        # Separate clean and removed
         clean = df.dropna()
         removed = df[df.isna().any(axis=1)]
-        ts = str(int(time.time()))
-        st.download_button("Cleaned CSV", clean.to_csv(index=False), file_name=f"cleaned_data_{ts}.csv")
-        st.download_button("Removed Rows CSV", removed.to_csv(index=False), file_name=f"removed_data_{ts}.csv")
-
+    
+        # Save cleaned CSV
+        cleaned_csv = f"cleaned_data_{ts}.csv"
+        removed_csv = f"removed_data_{ts}.csv"
+        clean.to_csv(cleaned_csv, index=False)
+        removed.to_csv(removed_csv, index=False)
+    
+        st.download_button("📥 Download Cleaned CSV", data=clean.to_csv(index=False), file_name=cleaned_csv, mime="text/csv")
+        st.download_button("📥 Download Removed Rows CSV", data=removed.to_csv(index=False), file_name=removed_csv, mime="text/csv")
+    
+        # ============================ 🆔 Generate custom_id ============================
         author_map, counter = {}, {}
         ids, gcount = [], 1
         for _, row in clean.iterrows():
@@ -175,24 +198,72 @@ with tab3:
             else:
                 counter[a] += 1
             ids.append(f"{author_map[a]}-{k}-{counter[a]}")
-
         clean["custom_id"] = ids
         final = clean[["custom_id"] + [c for c in clean.columns if c != "custom_id"]]
-        st.download_button("Structured CSV", final.to_csv(index=False), file_name=f"structured_datawith_id_{ts}.csv")
-
+    
+        structured_csv = f"structured-data-id_{ts}.csv"
+        final.to_csv(structured_csv, index=False)
+        st.download_button("📥 Download Structured CSV", data=final.to_csv(index=False), file_name=structured_csv, mime="text/csv")
+    
+        # ============================ 🔄 Generate JSONL ============================
         payloads = []
         for _, row in final.iterrows():
             quotes = [row.get(f"s{i}paragraph1", '') for i in range(2, 10)]
             block = "\n".join(f"- {q}" for q in quotes if q and q != "NA")
             author = row['Author']
             prompt = f"You're given a series of quotes by {author}.\nUse them to generate metadata for a web story.\nQuotes:\n{block}\n\nPlease respond ONLY in this exact JSON format:\n{{\n  \"storytitle\": \"...\",\n  \"metadescription\": \"...\",\n  \"metakeywords\": \"...\"\n}}"
-            payloads.append({"custom_id": row["custom_id"], "method": "POST", "url": "/chat/completions",
-                              "body": {"model": "gpt-4o-global-batch", "messages": [
-                                  {"role": "system", "content": "You are a creative and SEO-savvy content writer."},
-                                  {"role": "user", "content": prompt}]}})
-
-        jsonl_str = "\n".join(json.dumps(p) for p in payloads)
-        st.download_button("Download JSONL Batch", data=jsonl_str, file_name=f"quotefancy_azure_batch_{ts}.jsonl")
+            payloads.append({
+                "custom_id": row["custom_id"],
+                "method": "POST",
+                "url": "/chat/completions",
+                "body": {
+                    "model": deployment_model,
+                    "messages": [
+                        {"role": "system", "content": "You are a creative and SEO-savvy content writer."},
+                        {"role": "user", "content": prompt}
+                    ]
+                }
+            })
+    
+        jsonl_filename = f"quotefancy_azure_batch_{ts}.jsonl"
+        jsonl_str = '\n'.join(json.dumps(record) for record in payloads)
+        st.download_button("📥 Download JSONL File", data=jsonl_str, file_name=jsonl_filename, mime="application/jsonl")
+    
+        # ============================ ⬆️ Upload JSONL to Azure ============================
+        with open(jsonl_filename, "w") as f:
+            f.write(jsonl_str)
+        with open(jsonl_filename, "rb") as f:
+            batch_file = client.files.create(
+                file=f,
+                purpose="batch",
+                extra_body={"expires_after": {"seconds": 1209600, "anchor": "created_at"}}
+            )
+        file_id = batch_file.id
+        st.success("✅ File uploaded to Azure.")
+        st.json(batch_file.model_dump())
+    
+        # ============================ 🚀 Submit Batch Job ============================
+        batch_job = client.batches.create(
+            input_file_id=file_id,
+            endpoint="/chat/completions",
+            completion_window="24h",
+            extra_body={"output_expires_after": {"seconds": 1209600, "anchor": "created_at"}}
+        )
+        batch_id = batch_job.id
+        st.success(f"🚀 Batch job submitted successfully! Batch ID: {batch_id}")
+    
+        # ============================ 💾 Save Tracking Info ============================
+        tracking_info = {
+            "ts": ts,
+            "batch_id": batch_id,
+            "file_id": file_id,
+            "jsonl_file": jsonl_filename,
+            "csv_file": structured_csv
+        }
+        track_filename = f"azure_batch_tracking_{ts}.json"
+        st.download_button("📥 Download Tracking JSON", data=json.dumps(tracking_info, indent=2), file_name=track_filename, mime="application/json")
+    
+        st.info("✅ You can now close the app or monitor the batch using the Batch ID.")
         
 # ------------------- TAB 4 -------------------
 with tab4:
