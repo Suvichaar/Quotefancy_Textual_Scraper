@@ -5,4 +5,4 @@ beautifulsoup4
 simple_image_download
 boto3
 openai
-azure
+azure-storage-blob
