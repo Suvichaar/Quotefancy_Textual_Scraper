@@ -360,27 +360,37 @@ with tab5:
 
 # ------------------- TAB 6 -------------------
 with tab6:
-    st.header("🖼️ Bulk Image Downloader + S3 CDN Uploader")
     aws_access_key = st.secrets["aws_access_key"]
     aws_secret_key = st.secrets["aws_secret_key"]
     region_name = "ap-south-1"
     bucket_name = "suvichaarapp"
     s3_prefix = "media/"
     cdn_base_url = "https://cdn.suvichaar.org/"
-
-    s3 = boto3.client("s3", aws_access_key_id=aws_access_key, aws_secret_access_key=aws_secret_key, region_name=region_name)
-
-    keywords_input = st.text_input("Enter keywords", "cat,dog,car")
-    count = st.number_input("Images per keyword", 1, 100, 5)
+    
+    # ============================ 🎯 UI ============================
+    st.title("🖼️ Bulk Image Downloader + S3 Uploader + CDN Transformer")
+    
+    keywords_input = st.text_input("Enter keywords (comma-separated)", "cat,dog,car")
+    count = st.number_input("Number of images per keyword", min_value=1, max_value=50, value=5)
     filename_input = st.text_input("Output CSV filename", "image_links")
-
-    if st.button("Download & Upload Images"):
-        if os.path.exists("simple_images"): shutil.rmtree("simple_images")
-        for keyword in [k.strip() for k in keywords_input.split(",") if k.strip()]:
-            st.write(f"Downloading {count} images for {keyword}")
-            simp.simple_image_download().download(keyword, count)
-
+    
+    if st.button("🚀 Download, Upload, and Transform"):
+        if os.path.exists("simple_images"):
+            shutil.rmtree("simple_images")
+    
+        response = simp.simple_image_download()
+    
+        keywords = [k.strip() for k in keywords_input.split(",") if k.strip()]
+        for keyword in keywords:
+            st.write(f"📥 Downloading {count} images for {keyword}")
+            response.download(keyword, count)
+    
+        # Upload to S3
+        s3 = boto3.client("s3", aws_access_key_id=aws_access_key,
+                          aws_secret_access_key=aws_secret_key, region_name=region_name)
+    
         results = []
+    
         for folder, _, files_ in os.walk("simple_images"):
             for f in files_:
                 path = os.path.join(folder, f)
@@ -389,12 +399,58 @@ with tab6:
                 key = f"{s3_prefix}{kf}/{fname}"
                 try:
                     s3.upload_file(path, bucket_name, key)
-                    results.append([kf, fname, f"{cdn_base_url}{key}"])
+                    cdn_url = f"{cdn_base_url}{key}"
+                    results.append([kf, fname, cdn_url])
+                    st.write(f"✅ Uploaded {fname}")
                 except Exception as e:
-                    st.error(f"Failed for {fname}: {e}")
-        out = io.StringIO()
-        csv.writer(out).writerows([["Keyword", "Filename", "CDN_URL"]] + results)
-        st.download_button("Download CDN CSV", out.getvalue(), file_name=f"{filename_input}.csv")
+                    st.error(f"❌ Failed to upload {fname}: {e}")
+    
+        # Save initial DataFrame
+        df = pd.DataFrame(results, columns=["Keyword", "Filename", "CDN_URL"])
+    
+        # Transform CDN URLs
+        st.write("🔄 Transforming URLs...")
+    
+        template = {
+            "bucket": bucket_name,
+            "key": "keyValue",
+            "edits": {
+                "resize": {
+                    "width": 720,
+                    "height": 1280,
+                    "fit": "cover"
+                }
+            }
+        }
+    
+        transformed_urls = []
+        for _, row in df.iterrows():
+            media_url = row["CDN_URL"]
+            try:
+                if not isinstance(media_url, str):
+                    raise ValueError("Invalid CDN URL")
+    
+                if media_url.startswith("https://cdn.suvichaar.org/"):
+                    media_url = media_url.replace("https://cdn.suvichaar.org/", "https://media.suvichaar.org/")
+                elif not media_url.startswith("https://media.suvichaar.org/"):
+                    raise ValueError("CDN URL must start with supported domain")
+    
+                key_value = media_url.replace("https://media.suvichaar.org/", "")
+                template["key"] = key_value
+                encoded = base64.urlsafe_b64encode(json.dumps(template).encode()).decode()
+                final_url = f"https://media.suvichaar.org/{encoded}"
+                transformed_urls.append(final_url)
+    
+            except Exception as e:
+                transformed_urls.append("ERROR")
+    
+        df["standardurl"] = transformed_urls
+    
+        # Display and download
+        st.dataframe(df.head())
+    
+        output_csv = df.to_csv(index=False)
+        st.download_button("📥 Download Images CSV", output_csv, file_name="image_cdn_links.csv", mime="text/csv")
 
 # ------------------- TAB 7 -------------------
 with tab7:
