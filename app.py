@@ -30,7 +30,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 , tab7 = st.tabs([
     "🧠 Quote Metadata Generator & Azure OpenAI JSONL Creator ",
     "📦 Azure Batch Result Fetcher & Blob Uploader",
     "👤 Distinct Author Extractor",
-    "🖼️ Bulk Image Downloader + S3 CDN Uploader",
+    "🖼️ Bulk Image Downloader + S3 Uploader + CDN Transformer",
     "📅 Merge Metadata into Structured CSV"
 ])
 
