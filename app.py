@@ -374,18 +374,19 @@ with tab6:
     count = st.number_input("Number of images per keyword", min_value=1, max_value=50, value=5)
     filename_input = st.text_input("Output CSV filename", "image_links")
     
+    # ============================ 🚀 Main Process ============================
     if st.button("🚀 Download, Upload, and Transform"):
         if os.path.exists("simple_images"):
             shutil.rmtree("simple_images")
     
         response = simp.simple_image_download()
-    
         keywords = [k.strip() for k in keywords_input.split(",") if k.strip()]
+    
         for keyword in keywords:
             st.write(f"📥 Downloading {count} images for {keyword}")
             response.download(keyword, count)
     
-        # Upload to S3
+        # Initialize S3 client
         s3 = boto3.client("s3", aws_access_key_id=aws_access_key,
                           aws_secret_access_key=aws_secret_key, region_name=region_name)
     
@@ -405,11 +406,11 @@ with tab6:
                 except Exception as e:
                     st.error(f"❌ Failed to upload {fname}: {e}")
     
-        # Save initial DataFrame
+        # Create DataFrame from results
         df = pd.DataFrame(results, columns=["Keyword", "Filename", "CDN_URL"])
     
-        # Transform CDN URLs
-        st.write("🔄 Transforming URLs...")
+        # ============================ 🔄 Transform URLs ============================
+        st.write("🔄 Transforming CDN URLs...")
     
         template = {
             "bucket": bucket_name,
@@ -424,34 +425,31 @@ with tab6:
         }
     
         transformed_urls = []
-        for _, row in df.iterrows():
-            media_url = row["CDN_URL"]
+    
+        for idx, row in df.iterrows():
+            media_url = str(row["CDN_URL"]).strip()
             try:
-                if not isinstance(media_url, str):
-                    raise ValueError("Invalid CDN URL")
+                if not media_url.startswith("https://cdn.suvichaar.org/") and not media_url.startswith("https://media.suvichaar.org/"):
+                    raise ValueError(f"Unsupported domain in URL: {media_url}")
     
                 if media_url.startswith("https://cdn.suvichaar.org/"):
                     media_url = media_url.replace("https://cdn.suvichaar.org/", "https://media.suvichaar.org/")
-                elif not media_url.startswith("https://media.suvichaar.org/"):
-                    raise ValueError("CDN URL must start with supported domain")
     
                 key_value = media_url.replace("https://media.suvichaar.org/", "")
                 template["key"] = key_value
                 encoded = base64.urlsafe_b64encode(json.dumps(template).encode()).decode()
                 final_url = f"https://media.suvichaar.org/{encoded}"
                 transformed_urls.append(final_url)
-    
             except Exception as e:
+                st.error(f"⚠️ Error in row {idx}: {e}")
                 transformed_urls.append("ERROR")
     
         df["standardurl"] = transformed_urls
     
-        # Display and download
+        # ============================ 📁 Show + Download ============================
         st.dataframe(df.head())
-    
         output_csv = df.to_csv(index=False)
-        st.download_button("📥 Download Images CSV", output_csv, file_name="image_cdn_links.csv", mime="text/csv")
-
+        st.download_button("📥 Download Image Links CSV", output_csv, file_name=f"{filename_input}.csv", mime="text/csv")
 # ------------------- TAB 7 -------------------
 with tab7:
     st.header("📅 Merge Metadata into Structured CSV")
