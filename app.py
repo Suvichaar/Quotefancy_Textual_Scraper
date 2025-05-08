@@ -6,6 +6,7 @@ import io
 import re
 import json
 import datetime
+import base64
 import os
 import shutil
 from urllib.parse import urlparse
